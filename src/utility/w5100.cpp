@@ -11,10 +11,13 @@
 #include <Arduino.h>
 #include "Ethernet.h"
 #include "w5100.h"
-
+#ifdef USE_WDT
 extern "C" {
 #include "wdtFunctions.h"					////// WARNING! A copy of wdtFunctions had to be put in Ethernet/src directory to make this work. Make sure to update it if the main version ever changes
 }
+#else
+#define WDTCLEAR
+#endif
 
 /***************************************************/
 /**            Default SS pin setting             **/
@@ -506,7 +509,7 @@ void W5100Class::execCmdSn(SOCKET s, SockCMD _cmd)
 			delayMicroseconds(1);						// Connect and Disconnect often fail without this longer delay
 		else
 			delayMicroseconds(1);
-		wdtClear();										// clear watchdog timer if needed
+		WDTCLEAR										// clear watchdog timer if needed
 	} while (readSnCR(s));
 }
 
@@ -539,7 +542,7 @@ bool W5100Class::waitForCmd(SOCKET s, uint8_t SnSR_expected)
 			cumWaitTime+= micros() - start;				//   record wait time...
 			return false;								//    and return fail.
 		}
-		wdtClear();										// clear watchdog timer if needed
+		WDTCLEAR										// clear watchdog timer if needed
 	} while (stat != SnSR_expected);					// if the expected result occurs...
 
 	SPI.endTransaction();								//  end SPI transaction...
@@ -576,7 +579,7 @@ bool W5100Class::waitForCmd(SOCKET s, uint8_t SnSR_expected1, uint8_t SnSR_expec
 			cumWaitTime+= micros() - start;				//   record wait time...
 			return false;								//    and return fail.
 		}
-		wdtClear();										// clear watchdog timer if needed
+		WDTCLEAR										// clear watchdog timer if needed
 	} while (stat != SnSR_expected1 && 
 			 stat != SnSR_expected2 && 
 			 stat != SnSR_expected3);					// if one of the 3 expected results occurs...
