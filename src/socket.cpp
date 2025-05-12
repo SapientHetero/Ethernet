@@ -536,18 +536,18 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t * buf, uint16_t len)
 	W5100.execCmdSn(s, Sock_SEND);
 
 	/* +2008.01 bj */
-	while ( (W5100.readSnIR(s) & SnIR::SEND_OK) != SnIR::SEND_OK ) {
+//	while ( (W5100.readSnIR(s) & SnIR::SEND_OK) != SnIR::SEND_OK ) {
 		/* m2008.01 [bj] : reduce code */
-		if ( W5100.readSnSR(s) == SnSR::CLOSED ) {
+/*		if ( W5100.readSnSR(s) == SnSR::CLOSED ) {
 			SPI.endTransaction();
 			return 0;
 		}
 		SPI.endTransaction();
 		yield();
 		SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
-	}
+	} */
 	/* +2008.01 bj */
-	W5100.writeSnIR(s, SnIR::SEND_OK);
+	//W5100.writeSnIR(s, SnIR::SEND_OK);
 	SPI.endTransaction();
 	EthernetClass::lastSocketUse[s] = millis();			// record time at which socket sent data to support socket management.
 	return ret;
