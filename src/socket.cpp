@@ -506,8 +506,7 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t* buf, uint16_t len)
 	uint8_t status = 0;
 	uint16_t ret = 0;
 	uint16_t freesize = 0;										// empty bytes in W5500 circular buffer 
-	uint8_t ir;
-	uint16_t remblock = 0;										// remaining bytes to be sent after partial buffer write
+	uint16_t remblock = 0;										// remaining bytes to be sent
 	uint32_t start;
 
 	if (len > W5100.SSIZE) {
@@ -522,7 +521,7 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t* buf, uint16_t len)
 	freesize = getSnTX_FSR(s);									// currently available space in socket n's circular write buffer
 	status = W5100.readSnSR(s);
 	SPI.endTransaction();
-	remblock = ret;												// number of bytes that won't currently fit in circular buffer
+	remblock = ret;												// initialize remblock to buffer length
 
 	// if any free space is available, start.
 	if (freesize < remblock) {									// if all "len" bytes can't be written...
@@ -530,7 +529,7 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t* buf, uint16_t len)
 			SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
 			write_data(s, 0, (uint8_t*)buf, freesize);			// make use of wait time by writing all that will fit, then write the rest when there's room
 			W5100.writeSnIR(s, (SnIR::SEND_OK | SnIR::TIMEOUT));// clear SnIR SEND_OK and TIMEOUT bits before starting next send
-			W5100.execCmdSn(s, Sock_SEND);
+			W5100.execCmdSn(s, Sock_SEND);						// SEND command sets Socket Tx read pointer to TX write pointer value
 			SPI.endTransaction();
 			remblock = ret - freesize;							// number of bytes that won't currently fit in circular buffer
 		}
