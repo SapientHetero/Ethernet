@@ -505,8 +505,10 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t* buf, uint16_t len)
 {
 	uint8_t status = 0;
 	uint16_t ret = 0;
-	uint16_t freesize = 0;
+	uint16_t freesize = 0;										// empty bytes in W5500 circular buffer 
 	uint8_t ir;
+	uint16_t remblock = 0;										// remaining bytes to be sent after partial buffer write
+	uint32_t start;
 
 	if (len > W5100.SSIZE) {
 		ret = W5100.SSIZE; // check size not to exceed MAX size.
@@ -515,66 +517,45 @@ uint16_t EthernetClass::socketSend(uint8_t s, const uint8_t* buf, uint16_t len)
 		ret = len;
 	}
 
-	// if freebuf is available, start.
-	uint32_t start = millis();									// record time loop is entered +rs 17Feb2019
-	do {
-		SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
-		freesize = getSnTX_FSR(s);
-		status = W5100.readSnSR(s);
-		SPI.endTransaction();
-		if ((status != SnSR::ESTABLISHED) && (status != SnSR::CLOSE_WAIT)) {
-			ret = 0;
-			break;
-		}
-		if (millis() - start > 1000) {							// check for timeout +rs 17Feb2019 - find a way to use user-configurable _timeout
-			ret = 0;
-			return ret;
-		}
-		wdtClear();												// clear watchdog timer if needed
-		yield();
-	} while (freesize < ret);									// this would be a good place to add a timeout in case peer process crashes without closing socket +rs - DONE
-
-	// copy data
+	// read circular buffer free space
 	SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
-	W5100.writeSnIR(s, (SnIR::SEND_OK | SnIR::TIMEOUT));			// clear SnIR SEND_OK and TIMEOUT bits before they're checked below +rs 4APR2019
-	write_data(s, 0, (uint8_t*)buf, ret);
-	W5100.execCmdSn(s, Sock_SEND);
-
-	/* 5-12-2025: rs Removed unnecessary performance-killing code that waited until socket had transmitted data before returning. Send throughput quadrupled. */
-
-	/* +2008.01 bj */
-//	start = millis();															// record time loop is entered +rs 17Feb2019
-//	while (((ir = W5100.readSnIR(s)) & SnIR::SEND_OK) != SnIR::SEND_OK) {		// +rs 4APR2019 store SnIR for use in if statement in loop
-		/* m2008.01 [bj] : reduce code */
-/*		if ( W5100.readSnSR(s) == SnSR::CLOSED || ir == SnIR::TIMEOUT || 		//  +rs 4APR2019 check SnIR for timeout (hackers sometimes leave socket open, window full to hang system)
-			 millis() - start > 1000 ) {
-		if (W5100.readSnSR(s) == SnSR::CLOSED || ir == SnIR::TIMEOUT) { 		//  +rs 4APR2019 check SnIR for timeout (hackers sometimes leave socket open, window full to hang system)
-			SPI.endTransaction();
-			if (ir == SnIR::TIMEOUT) {
-#ifdef LOGERROR
-				logError("SnIR = ", false, __FILE__, __LINE__, __func__);
-				logError(ir, true, __FILE__, __LINE__, __func__);
-#endif
-			}
-			return 0;
-		}
-		else if (millis() - start > 35000) {      // ************** 35 SECOND timeout??? **************
-			SPI.endTransaction();
-#ifdef LOGERROR
-			logError("Timeout waiting for SEND to complete, SnIR = ", false, __FILE__, __LINE__, __func__);
-			logError(ir, true, __FILE__, __LINE__, __func__);
-#endif
-			return 0;
-		}
-		SPI.endTransaction();
-		wdtClear();																// clear watchdog timer if needed
-		yield();
-		SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
-	}
-	/* +2008.01 bj */
-//	W5100.writeSnIR(s, SnIR::SEND_OK);*/
+	freesize = getSnTX_FSR(s);									// currently available space in socket n's circular write buffer
+	status = W5100.readSnSR(s);
 	SPI.endTransaction();
-	EthernetClass::lastSocketUse[s] = millis();			// record time at which socket sent data to support socket management.
+	remblock = ret;												// number of bytes that won't currently fit in circular buffer
+
+	// if any free space is available, start.
+	if (freesize < remblock) {									// if all "len" bytes can't be written...
+		if (freesize > 0) {										//  but some space is available...
+			SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+			write_data(s, 0, (uint8_t*)buf, freesize);			// make use of wait time by writing all that will fit, then write the rest when there's room
+			W5100.writeSnIR(s, (SnIR::SEND_OK | SnIR::TIMEOUT));// clear SnIR SEND_OK and TIMEOUT bits before starting next send
+			W5100.execCmdSn(s, Sock_SEND);
+			SPI.endTransaction();
+			remblock = ret - freesize;							// number of bytes that won't currently fit in circular buffer
+		}
+	// now wait for more space in circular buffer
+		start = millis();										// record time loop is entered +rs 17Feb2019
+		do {
+			SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+			freesize = getSnTX_FSR(s);
+			status = W5100.readSnSR(s);
+			SPI.endTransaction();
+			if ((status != SnSR::ESTABLISHED) && (status != SnSR::CLOSE_WAIT) || millis() - start > 1000)		// todo - implement user-configurable _timeout
+				return ret - remblock;
+			wdtClear();											// clear watchdog timer if needed
+			yield();
+		} while (freesize < remblock);							// loop until there's enough space or timeout occurs (in case peer process crashes without closing socket) +rs
+	}
+
+	// when space is available, write remainder of data
+	SPI.beginTransaction(SPI_ETHERNET_SETTINGS);
+	write_data(s, 0, (uint8_t*)(buf+len-remblock), remblock);
+	W5100.writeSnIR(s, (SnIR::SEND_OK | SnIR::TIMEOUT));		// clear SnIR SEND_OK and TIMEOUT bits before starting next send+rs 18May2025
+	W5100.execCmdSn(s, Sock_SEND);
+	SPI.endTransaction();
+
+	EthernetClass::lastSocketUse[s] = millis();					// record time at which socket sent data to support socket management.
 	return ret;
 }
 
